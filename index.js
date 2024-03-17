@@ -2,11 +2,6 @@ import { readFileSync, writeFileSync } from "fs";
 import { read, utils, write } from "xlsx/xlsx.mjs";
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
-import FormData from "form-data";
-import * as fs from "fs";
-import * as util from "util";
-import * as stream from "stream";
-const pipeline = util.promisify(stream.pipeline);
 
 import { NFT2Client } from "@darenft-labs/nft2-client";
 
@@ -20,11 +15,15 @@ await nft2Client.initialize().then(() => {
 
 const downloadFile = async (url) => {
   const filename = url.split("/").pop();
+
   const response = await axios.get(url, {
-    responseType: "stream",
+    responseType: "arraybuffer",
   });
-  await pipeline(response.data, fs.createWriteStream(filename));
-  return filename;
+
+  return {
+    filename,
+    data: response.data
+  };
 };
 
 const generateFileName = (originalName) => {
@@ -58,18 +57,14 @@ const getPresignedUrl = async (filename) => {
   return presignedList.urls[0];
 };
 
-const uploadToIPFS = async (filename, presignedUrl) => {
-  const form_data = new FormData();
-  form_data.append("file", fs.createReadStream(filename));
-
-  const response = await axios.put(presignedUrl, form_data, {
+const uploadToIPFS = async (data, presignedUrl) => {
+  const response = await axios.put(presignedUrl, data, {
     headers: {
       "Content-Type": "image/png", // mimeType
     },
   });
 
   const imageData = {
-    image_name: filename,
     image_cid: response.headers?.["x-amz-meta-cid"], // CID of image on IPFS
   };
 
@@ -99,19 +94,17 @@ const main = async () => {
     }
     console.log("process file: ", url);
     try {
-      const filename = await downloadFile(url);
+      const {filename, data} = await downloadFile(url);
       const presignUrl = await getPresignedUrl(filename);
-      const { image_name, image_cid } = await uploadToIPFS(
-        filename,
+      const { image_cid } = await uploadToIPFS(
+        data,
         presignUrl
       );
       result.push({
-        image_name,
+        filename,
         ipfs: "https://cloudflare-ipfs.com/ipfs/" + image_cid,
       });
-      fs.unlink(filename, function (err) {
-        if (err) throw err;
-      });
+      
     } catch (error) {
       console.log("error file ", url, error);
     }
